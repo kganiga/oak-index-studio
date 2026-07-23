@@ -1,0 +1,47 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-ink: 14 17 20;
+  --color-panel: 21 26 31;
+  --color-panel2: 26 33 39;
+  --color-line: 36 45 52;
+  --color-oak: 217 164 65;
+  --color-oakdim: 156 122 53;
+  --color-mint: 91 191 154;
+  --color-warn: 224 179 76;
+  --color-danger: 224 108 91;
+  --color-fg: 214 221 227;
+  --color-dim: 138 151 160;
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  --color-ink: 247 248 250;
+  --color-panel: 255 255 255;
+  --color-panel2: 241 243 245;
+  --color-line: 221 225 229;
+  --color-oak: 168 116 42;
+  --color-oakdim: 122 86 32;
+  --color-mint: 47 157 115;
+  --color-warn: 166 121 10;
+  --color-danger: 192 57 43;
+  --color-fg: 27 33 38;
+  --color-dim: 91 101 112;
+  color-scheme: light;
+}
+
+body { background: rgb(var(--color-ink)); color: rgb(var(--color-fg)); }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: rgb(var(--color-panel2)); }
+::-webkit-scrollbar-thumb { background: rgb(var(--color-line)); border-radius: 5px; }
+::-webkit-scrollbar-thumb:hover { background: rgb(var(--color-dim)); }
+
+.eyebrow {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: rgb(var(--color-oakdim));
+}
