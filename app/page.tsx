@@ -1056,7 +1056,7 @@ export default function Page() {
       </div>
 
       {/* Bottom: warnings / suggestions / score */}
-      <footer className="grid max-h-56 grid-cols-1 gap-px overflow-hidden border-t border-line bg-line lg:grid-cols-[1fr_1fr_360px]">
+      <div className="grid max-h-56 grid-cols-1 gap-px overflow-hidden border-t border-line bg-line lg:grid-cols-[1fr_1fr_360px]">
         <div className="overflow-y-auto bg-panel p-3">
           <p className="eyebrow mb-2">/warnings</p>
           {!result?.warnings.length ? (
@@ -1091,6 +1091,27 @@ export default function Page() {
             Heuristic estimate from static analysis. Real cost depends on repository size and index statistics — verify with Explain Query after deployment.
           </p>
         </div>
+      </div>
+
+      <footer className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 border-t border-line bg-panel px-4 py-2 text-center text-[10px] text-dim">
+        <span>
+          Privacy: everything runs in your browser — queries, index definitions, and analysis are never sent to a
+          server. Saved history and theme live only in your browser&apos;s local storage; clear them anytime via
+          your browser settings.
+        </span>
+        <span>
+          Terms: provided as-is, no warranty —{" "}
+          <a href="https://github.com/kganiga/oak-index-studio/blob/master/LICENSE" target="_blank" rel="noreferrer" className="underline hover:text-fg">
+            MIT licensed
+          </a>
+          .
+        </span>
+        <span>
+          <a href="https://github.com/kganiga/oak-index-studio/issues" target="_blank" rel="noreferrer" className="underline hover:text-fg">
+            Contact / report an issue
+          </a>
+        </span>
+        <span>Independent community tool — not affiliated with, endorsed by, or sponsored by Adobe.</span>
       </footer>
     </main>
   );
