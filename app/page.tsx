@@ -222,7 +222,7 @@ export default function Page() {
     setTheme(next);
     if (next === "light") document.documentElement.setAttribute("data-theme", "light");
     else document.documentElement.removeAttribute("data-theme");
-    try { window.localStorage.setItem("oak-index-analyzer:theme", next); } catch { /* storage unavailable — theme just won't persist */ }
+    try { window.localStorage.setItem("oak-index-studio:theme", next); } catch { /* storage unavailable — theme just won't persist */ }
   };
 
   const activeQuery = (tab === "Explain" || tab === "ExistingXML") ? (inputs.SQL2 || inputs.XPath || inputs.QueryBuilder) : inputs[tab];
@@ -452,7 +452,7 @@ export default function Page() {
     <main className="flex h-screen flex-col">
       {/* Header */}
       <header className="flex flex-wrap items-center justify-between gap-2 border-b border-line bg-panel px-5 py-3">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3" title="Independent community tool — not affiliated with, endorsed by, or sponsored by Adobe.">
           <TreePine className="h-5 w-5 text-oak" />
           <div>
             <h1 className="text-sm font-semibold tracking-wide">Oak Index Studio</h1>

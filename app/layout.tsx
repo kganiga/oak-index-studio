@@ -31,7 +31,7 @@ export const metadata: Metadata = {
 const THEME_INIT = `
 (function () {
   try {
-    var t = localStorage.getItem("oak-index-analyzer:theme");
+    var t = localStorage.getItem("oak-index-studio:theme");
     if (t === "light") document.documentElement.setAttribute("data-theme", "light");
   } catch (e) {}
 })();

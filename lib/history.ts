@@ -7,7 +7,7 @@ export interface HistoryEntry {
   target: string;
 }
 
-const STORAGE_KEY = "oak-index-analyzer:history";
+const STORAGE_KEY = "oak-index-studio:history";
 const MAX_ENTRIES = 25;
 
 function hasStorage(): boolean {

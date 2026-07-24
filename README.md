@@ -1,5 +1,9 @@
 # Oak Index Studio
 
+*An independent, community-built tool — not affiliated with, endorsed by, or
+sponsored by Adobe. "AEM", "Adobe Experience Manager", and "Oak" are
+trademarks of their respective owners.*
+
 Paste an AEM query (SQL2, XPath, or Query Builder) and get a production-shaped
 Oak lucene index definition with reasoning for every attribute — plus a full
 suite of analysis around it: an index health score, a heuristic performance
@@ -57,3 +61,7 @@ Open http://localhost:3000. Production build: `npm run build && npm start`.
   instead of silently producing a wrong index.
 - Joins, leading-wildcard LIKE, and LENGTH() cannot be fixed by any index;
   the tool tells you why instead of pretending.
+
+## License
+
+[MIT](LICENSE).
