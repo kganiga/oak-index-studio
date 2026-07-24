@@ -37,7 +37,9 @@ function buildRuleProperties(props: PropRestriction[], reasons: Reason[], warnin
     }
 
     const wantsPropertyIndex =
-      p.ops.some((o) => ["=", "!=", "in", "range", "like", "exists", "not", "order"].includes(o)) || p.ordered;
+      p.ops.some((o) => ["=", "!=", "in", "range", "like", "exists", "order"].includes(o)) ||
+      (p.ops.includes("not") && p.nullCheck) ||
+      p.ordered;
     if (wantsPropertyIndex) {
       pd.propertyIndex = true;
       reasons.push({ target: p.name, attribute: "propertyIndex=true", why: `Query filters on this property (${p.ops.filter(o=>o!=="order").join(", ") || "sort only"}) — without propertyIndex the value is not stored for lookup and the condition would be post-filtered.` });
@@ -84,6 +86,28 @@ interface SelectorGroup {
 }
 
 /**
+ * Merges one property into a target list by name instead of blindly appending a duplicate —
+ * used when folding UNION branches / JOIN selectors that share a node type together. Ops union;
+ * boolean flags OR together; a "String" default type yields to a more specific one already found.
+ */
+function mergeProp(target: PropRestriction[], p: PropRestriction) {
+  const existing = target.find((x) => x.name === p.name);
+  if (!existing) {
+    target.push(p);
+    return;
+  }
+  for (const op of p.ops) if (!existing.ops.includes(op)) existing.ops.push(op);
+  existing.ordered = existing.ordered || p.ordered;
+  existing.analyzed = existing.analyzed || p.analyzed;
+  existing.facet = existing.facet || p.facet;
+  existing.multi = existing.multi || p.multi;
+  existing.notNullCheck = existing.notNullCheck || p.notNullCheck;
+  existing.nullCheck = existing.nullCheck || p.nullCheck;
+  if (existing.type === "String" && p.type !== "String") existing.type = p.type;
+  if (!existing.func && p.func) existing.func = p.func;
+}
+
+/**
  * Splits the flat, cross-selector property list by which JOIN selector each
  * property actually belongs to, using the already-computed SQL2SelectorModel.
  * Oak evaluates indexRules strictly per node type, so a property queried on
@@ -121,7 +145,13 @@ function splitPropsBySelector(
   return { primary: groups[0], extras: groups.slice(1) };
 }
 
-export function generate(model: QueryModel, explain: ExplainInfo, target: Target, selectorModel?: SQL2SelectorModel | null): AnalysisResult {
+export function generate(
+  model: QueryModel,
+  explain: ExplainInfo,
+  target: Target,
+  selectorModel?: SQL2SelectorModel | null,
+  additionalUnionBranches?: QueryModel[] | null
+): AnalysisResult {
   const reasons: Reason[] = [];
   const suggestions: string[] = [];
 
@@ -155,20 +185,45 @@ export function generate(model: QueryModel, explain: ExplainInfo, target: Target
   reasons.push({ target: "index root", attribute: "type=lucene / compatVersion=2", why: "Lucene compat 2 is the only index type supporting the combination of property, ordered, analyzed and facet definitions in one index; required on AEMaaCS." });
   reasons.push({ target: "index root", attribute: `async=${JSON.stringify(def.async)}`, why: target === "cloud" ? "Async + NRT: near-real-time updates between async cycles, standard for AEMaaCS." : "Asynchronous indexing keeps commits fast; add 'nrt' only if sub-5s visibility is required." });
 
-  if (model.paths.length) {
-    def.includedPaths = [...new Set(model.paths)];
-    def.queryPaths = def.includedPaths;
+  // includedPaths: merge the primary branch's paths with every additional UNION branch's own
+  // paths — each UNION branch is a fully independent query and may be scoped to a different
+  // path entirely, so using only the primary branch's paths could leave other branches'
+  // content completely outside the index's covered subtree. (JOIN-selector paths need no
+  // separate merge: parseSQL2's whole-query path scan already folds them into model.paths.)
+  const unionBranches = additionalUnionBranches ?? [];
+  const mergedPaths = [...new Set([...model.paths, ...unionBranches.flatMap((b) => b.paths)])];
+
+  if (mergedPaths.length) {
+    def.includedPaths = mergedPaths;
+    def.queryPaths = mergedPaths;
     def.evaluatePathRestrictions = true;
-    reasons.push({ target: "index root", attribute: `includedPaths=${JSON.stringify(def.includedPaths)}`, why: "Only content under the query's path restriction is indexed — smaller index, faster reindex." });
+    reasons.push({ target: "index root", attribute: `includedPaths=${JSON.stringify(mergedPaths)}`, why: "Only content under the query's path restriction is indexed — smaller index, faster reindex." });
     reasons.push({ target: "index root", attribute: "evaluatePathRestrictions=true", why: "Stores :ancestors so ISDESCENDANTNODE / path= is evaluated inside lucene instead of post-filtering every hit." });
     reasons.push({ target: "index root", attribute: "queryPaths", why: "Tells the query engine this index only answers queries under these paths — prevents wrong index selection for unrelated queries." });
-  } else if (props.length || model.nodeScopeFulltext) {
-    def.evaluatePathRestrictions = true;
-    reasons.push({ target: "index root", attribute: "evaluatePathRestrictions=true", why: "Kept on even without includedPaths so future path-restricted variants of this query still evaluate paths in the index." });
   }
 
-  /* ---------- properties, split by JOIN selector when there is more than one ---------- */
+  /* ---------- properties, split by JOIN selector and/or UNION branch when there is more than one ---------- */
   const { primary, extras } = splitPropsBySelector(model, props, selectorModel, warnings);
+
+  // Fold JOIN-selector groups and additional UNION branches into per-node-type groups. A group
+  // that shares the primary rule's own node type is merged directly into primary (e.g. a
+  // self-JOIN, or a UNION branch that happens to target the same type) instead of creating a
+  // second indexRules entry that would silently overwrite the first; groups merge by property
+  // name (mergeProp) instead of duplicating a property already present.
+  const extraGroups = new Map<string, { nodeType: string; label: string; props: PropRestriction[] }>();
+  const foldGroup = (nodeType: string, label: string, groupProps: PropRestriction[]) => {
+    if (!groupProps.length) return;
+    if (nodeType === primary.nodeType) {
+      for (const p of groupProps) mergeProp(primary.props, p);
+      return;
+    }
+    let g = extraGroups.get(nodeType);
+    if (!g) { g = { nodeType, label, props: [] }; extraGroups.set(nodeType, g); }
+    for (const p of groupProps) mergeProp(g.props, p);
+  };
+  for (const extra of extras) foldGroup(extra.nodeType, `JOIN selector '${extra.alias}'`, extra.props);
+  unionBranches.forEach((branch, i) => foldGroup(branch.nodeType, `UNION branch ${i + 2} (${branch.nodeType})`, Object.values(branch.props)));
+  const extrasFinal = [...extraGroups.values()];
 
   const ruleProps = buildRuleProperties(primary.props, reasons, warnings);
 
@@ -200,8 +255,7 @@ export function generate(model: QueryModel, explain: ExplainInfo, target: Target
   const indexRules: Record<string, unknown> = { "jcr:primaryType": "nt:unstructured", [model.nodeType]: rule };
   reasons.push({ target: "index root", attribute: `indexRules/${model.nodeType}`, why: `Rule scoped to ${model.nodeType} — only nodes of this type (and subtypes) are indexed, keeping the index minimal.` });
 
-  for (const extra of extras) {
-    if (!extra.props.length) continue;
+  for (const extra of extrasFinal) {
     const extraRuleProps = buildRuleProperties(extra.props, reasons, warnings);
     indexRules[extra.nodeType] = {
       "jcr:primaryType": "nt:unstructured",
@@ -210,15 +264,18 @@ export function generate(model: QueryModel, explain: ExplainInfo, target: Target
     reasons.push({
       target: "index root",
       attribute: `indexRules/${extra.nodeType}`,
-      why: `Rule scoped to ${extra.nodeType} (JOIN selector '${extra.alias}') — Oak evaluates index rules strictly by a candidate node's own type, so properties queried on this selector must live under their own rule; they would never match under ${model.nodeType}.`
+      why: `Rule scoped to ${extra.nodeType} (${extra.label}) — Oak evaluates index rules strictly by a candidate node's own type, so properties queried on this selector/branch must live under their own rule; they would never match under ${model.nodeType}.`
     });
   }
   def.indexRules = indexRules;
 
-  if (extras.some((e) => e.props.length)) {
-    const coveredTypes = [model.nodeType, ...extras.filter((e) => e.props.length).map((e) => e.nodeType)];
+  if (extrasFinal.length) {
+    const coveredTypes = [model.nodeType, ...extrasFinal.map((e) => e.nodeType)];
+    const hasJoin = extras.some((e) => e.props.length > 0);
+    const hasUnion = unionBranches.some((b) => Object.keys(b.props).length > 0);
+    const label = hasJoin && hasUnion ? "Multi-selector JOIN / multi-branch UNION" : hasUnion ? "Multi-branch UNION" : "Multi-selector JOIN";
     warnings.push(
-      `Multi-selector JOIN: this index now covers ${coveredTypes.length} node types in one definition (${coveredTypes.join(", ")}). includedPaths/queryPaths/async apply to the WHOLE index, not per node type — if these selectors actually need different path scoping or async settings, use separate index definitions per node type instead.`
+      `${label}: this index now covers ${coveredTypes.length} node types in one definition (${coveredTypes.join(", ")}). includedPaths/queryPaths/async apply to the WHOLE index, not per node type — if these actually need different path scoping or async settings, use separate index definitions per node type instead.`
     );
   }
 

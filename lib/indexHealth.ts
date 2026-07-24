@@ -89,15 +89,15 @@ export function evaluateIndexHealth(def: Record<string, unknown>): IndexHealthRe
   }
 
   // ordered
-  const orderedNoIndex = props.filter((p) => p.pd.ordered === true && p.pd.propertyIndex !== true);
-  if (orderedNoIndex.length) {
-    for (const p of orderedNoIndex) {
-      push("ordered", p.label, 6, `${p.label} has ordered=true without propertyIndex=true — Oak typically needs propertyIndex alongside ordered for the property to be usable for both filtering and sorting; verify this is intentional.`);
-    }
-  } else {
-    const anyOrdered = props.some((p) => p.pd.ordered === true);
-    push("ordered", "all properties", 0, anyOrdered ? "Every ordered property also has propertyIndex=true — good." : "No ordered properties defined.");
-  }
+  const anyOrdered = props.some((p) => p.pd.ordered === true);
+  push(
+    "ordered",
+    "all properties",
+    0,
+    anyOrdered
+      ? "ordered=true properties detected — this alone is sufficient for ORDER BY (doc-values sorting); propertyIndex is only needed if the property is also filtered in a WHERE clause."
+      : "No ordered properties defined."
+  );
 
   // property types
   const looksLikeDateWrongType = props.filter((p) => inferTypeFromName(p.label) === "Date" && p.pd.type !== "Date");

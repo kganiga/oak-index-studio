@@ -79,7 +79,7 @@ suite("NOT (constraint)", () => {
   test("NOT(prop LIKE value) is recorded as a negation with an explanatory note, not a fabricated op", () => {
     const m = parseSQL2(`SELECT * FROM [cq:Page] WHERE NOT (p.[title] LIKE '%draft%')`);
     assertEqual(m.props["title"].ops, ["not"]);
-    assertTrue(m.notes.some((n) => /NOT-LIKE/.test(n)), "note explaining NOT LIKE handling");
+    assertTrue(m.notes.some((n) => /negated LIKE/.test(n)), "note explaining NOT LIKE handling");
   });
   test("KNOWN LIMITATION: compound NOT(a AND b) is not inverted (De Morgan expansion is out of scope) — flagged via a note instead", () => {
     const m = parseSQL2(`SELECT * FROM [cq:Page] WHERE NOT (p.[a] = '1' AND p.[b] = '2')`);
@@ -316,13 +316,17 @@ suite("JOIN — structural handling", () => {
     const m = parseSQL2(`SELECT * FROM [dam:Asset] AS a INNER JOIN [nt:base] AS c ON ISCHILDNODE(c, a) WHERE c.[status] = 'x'`);
     assertTrue(m.join === true, "join");
   });
-  test("KNOWN LIMITATION: UNION ALL — only the first branch's FROM/WHERE is reflected", () => {
+  test("parseSQL2 itself intentionally stays single-statement for UNION — use parseSQL2UnionBranches for the full query", () => {
+    // This used to be a real gap (UNION branches silently dropped everywhere). It's fixed now,
+    // but not by changing parseSQL2's contract — parseSQL2UnionBranches (see
+    // generate.union.test.ts) splits on UNION/UNION ALL and parses each branch through this same
+    // unchanged parseSQL2, then generate() merges the resulting indexRules. Calling parseSQL2
+    // directly on a UNION query still only reflects its first branch, by design.
     const m = parseSQL2(
       `SELECT * FROM [cq:Page] AS p WHERE p.[a] = 'x' UNION ALL SELECT * FROM [dam:Asset] AS d WHERE d.[b] = 'y'`
     );
     assertEqual(m.nodeType, "cq:Page");
-    // The second branch's own node type/property never surfaces in the flat model.
-    assertTrue(!("b" in m.props) || m.nodeType !== "dam:Asset", "second UNION branch not modeled");
+    assertTrue(!("b" in m.props) || m.nodeType !== "dam:Asset", "second UNION branch not modeled by parseSQL2 alone");
   });
 });
 

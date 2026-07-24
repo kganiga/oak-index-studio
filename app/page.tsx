@@ -6,7 +6,7 @@ import {
   AlertTriangle, CheckCircle2, Copy, Download, FileCode2, Lightbulb, TreePine,
   Sun, Moon, Share2, History as HistoryIcon, Save, Columns2, Keyboard, FileDown, ClipboardList, X, Trash2, FileText, BookOpen
 } from "lucide-react";
-import { parseSQL2, parseXPath, parseQueryBuilder, parseExplain, parseSQL2Selectors, parseExplainCosts } from "@/lib/analyze";
+import { parseSQL2, parseXPath, parseQueryBuilder, parseExplain, parseSQL2Selectors, parseExplainCosts, parseSQL2UnionBranches } from "@/lib/analyze";
 import { generate, Target } from "@/lib/generate";
 import { toJson, toContentXml, toRepoInit, toNodeTree, toPackage } from "@/lib/output";
 import { SAMPLES } from "@/lib/samples";
@@ -105,7 +105,7 @@ function ComparisonView({ a, b, onClose }: { a: HistoryEntry; b: HistoryEntry; o
             {row("Index name", ra?.result.indexName ?? "—", rb?.result.indexName ?? "—")}
             {row("Health score", ra ? `${ra.health.score}/100 (${ra.health.category})` : "—", rb ? `${rb.health.score}/100 (${rb.health.category})` : "—")}
             {row("Complexity", ra ? `${ra.perf.complexity} (${ra.perf.complexityScore}/100)` : "—", rb ? `${rb.perf.complexity} (${rb.perf.complexityScore}/100)` : "—")}
-            {row("Est. cost (heuristic)", ra ? `~${ra.perf.estimatedCostRange.low}–${ra.perf.estimatedCostRange.high}` : "—", rb ? `~${rb.perf.estimatedCostRange.low}–${rb.perf.estimatedCostRange.high}` : "—")}
+            {row("Relative cost heuristic (not Oak's cost=X)", ra ? `~${ra.perf.estimatedCostRange.low}–${ra.perf.estimatedCostRange.high}` : "—", rb ? `~${rb.perf.estimatedCostRange.low}–${rb.perf.estimatedCostRange.high}` : "—")}
             {row("Confidence", ra ? `${ra.perf.confidence}/100` : "—", rb ? `${rb.perf.confidence}/100` : "—")}
             {row("Warnings", ra ? String(ra.result.warnings.length) : "—", rb ? String(rb.result.warnings.length) : "—")}
             {row("Query score before → after", ra ? `${ra.result.scoreBefore} → ${ra.result.scoreAfter}` : "—", rb ? `${rb.result.scoreBefore} → ${rb.result.scoreAfter}` : "—")}
@@ -238,10 +238,11 @@ export default function Page() {
   const result = useMemo(() => {
     const q = querySource === "SQL2" ? inputs.SQL2 : querySource === "XPath" ? inputs.XPath : inputs.QueryBuilder;
     if (!q.trim()) return null;
-    const model =
-      querySource === "SQL2" ? parseSQL2(q) :
-      querySource === "XPath" ? parseXPath(q) :
-      parseQueryBuilder(q);
+    if (querySource === "SQL2") {
+      const [model, ...additionalUnionBranches] = parseSQL2UnionBranches(q);
+      return generate(model, parseExplain(inputs.Explain), target, selectorModel, additionalUnionBranches);
+    }
+    const model = querySource === "XPath" ? parseXPath(q) : parseQueryBuilder(q);
     return generate(model, parseExplain(inputs.Explain), target, selectorModel);
   }, [inputs, querySource, target, selectorModel]);
 
@@ -701,7 +702,7 @@ export default function Page() {
                         </p>
                       </div>
                       <div>
-                        <p className="text-[11px] text-dim">Estimated Oak cost (heuristic units)</p>
+                        <p className="text-[11px] text-dim">Relative cost heuristic (arbitrary scale — not Oak&apos;s cost=X)</p>
                         <p className="font-mono text-fg">~{performanceEstimate.estimatedCostRange.low}–{performanceEstimate.estimatedCostRange.high}</p>
                       </div>
                       <div>

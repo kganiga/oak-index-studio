@@ -221,6 +221,6 @@ export function estimatePerformance(model: QueryModel, selectorModel?: SQL2Selec
     confidenceReasoning,
     factors,
     assumptions,
-    disclaimer: "All figures on this page are heuristic estimates derived from the query's shape alone — they are not, and are not intended to approximate, Oak's real cost() values. Always verify with an actual Explain Query against the target repository before drawing conclusions."
+    disclaimer: "All figures on this page are heuristic estimates derived from the query's shape alone, on an arbitrary 0-100 scale — they are NOT Oak's real cost() values, and are not expressed in Oak's costPerEntry/costPerExecution units. Oak's actual cost is computed from real entryCount statistics in the live repository (cost ≈ entryCount × costPerEntry + costPerExecution), which this tool has no access to and therefore cannot emulate. Always verify with an actual Explain Query (cost=X) against the target repository before drawing conclusions."
   };
 }

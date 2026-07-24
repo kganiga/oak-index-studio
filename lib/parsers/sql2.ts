@@ -57,7 +57,7 @@ function applyComparison(
   const normOp = opRaw.toLowerCase() === "<>" ? "!=" : opRaw.toLowerCase();
   if (invert && normOp === "like") {
     pushOp(p, "not");
-    m.notes.push(`NOT (${name} LIKE ...) — negated LIKE isn't specially indexed; propertyIndex is added but exact NOT-LIKE semantics aren't optimized.`);
+    m.notes.push(`NOT (${name} LIKE ...) — negated LIKE isn't specially indexed; Oak has no way to bound an exclusion pattern from an index, so this condition is evaluated by scanning and post-filtering regardless of propertyIndex.`);
     return;
   }
   const finalOp = invert ? OP_INVERT[normOp] ?? normOp : normOp;
@@ -277,6 +277,47 @@ export function parseSQL2(qRaw: string): QueryModel {
 
   m.orCount = (stripQuoted(work).match(/\bor\b/gi) || []).length;
   return m;
+}
+
+/* ----------------------------------------------------------- SQL2 UNION */
+
+/** Replaces the contents of every single-quoted string with '\0' filler of the same length, so a
+ *  keyword search on the masked text can never match text that's actually inside a string literal
+ *  — while positions/lengths stay identical to the original, so match indices still apply to it. */
+function maskQuotedStrings(s: string): string {
+  return s.replace(/'(?:[^'\\]|\\.)*'/g, (m) => "'" + "\0".repeat(m.length - 2) + "'");
+}
+
+/**
+ * Splits a SQL2 query on top-level UNION / UNION ALL into its independent branch texts. Each
+ * branch is a complete, separate SELECT statement (different FROM, WHERE, possibly a different
+ * node type entirely) — not correlated the way JOIN selectors are. Never splits on the word
+ * "union" if it happens to appear inside a quoted string value.
+ */
+export function splitSQL2Union(qRaw: string): string[] {
+  const masked = maskQuotedStrings(qRaw);
+  const re = /\bunion\b(?:\s+all\b)?/gi;
+  const parts: string[] = [];
+  let lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(masked))) {
+    parts.push(qRaw.slice(lastIndex, m.index));
+    lastIndex = m.index + m[0].length;
+  }
+  parts.push(qRaw.slice(lastIndex));
+  return parts.map((p) => p.trim()).filter(Boolean);
+}
+
+/**
+ * Parses every UNION/UNION ALL branch of a SQL2 query independently (each branch through the
+ * unchanged, single-statement parseSQL2), returning one QueryModel per branch. For a query with
+ * no UNION, this is just [parseSQL2(qRaw)] — the same result as calling parseSQL2 directly, so
+ * callers can use this uniformly instead of branching on whether UNION is present.
+ */
+export function parseSQL2UnionBranches(qRaw: string): QueryModel[] {
+  const branches = splitSQL2Union(qRaw);
+  if (branches.length <= 1) return [parseSQL2(qRaw)];
+  return branches.map((b) => parseSQL2(b));
 }
 
 /* ------------------------------------------------------- SQL2 selectors */
