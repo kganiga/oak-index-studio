@@ -6,6 +6,7 @@ import "./generate.notlike-propertyindex.test";
 import "./indexHealth.ordered.test";
 import "./generate.evaluatepathrestrictions.test";
 import "./performanceEstimate.costdisclaimer.test";
+import "./queryBuilder.test";
 import { summarize } from "./harness";
 
 process.exit(summarize());

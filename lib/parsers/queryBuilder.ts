@@ -10,58 +10,55 @@ const QB_PREDICATES = new Set([
 
 const stripNum = (s: string) => s.replace(/^\d+_/, "");
 
-export function parseQueryBuilder(qRaw: string): QueryModel {
-  const m = emptyModel("QueryBuilder");
-  const entries: Record<string, string> = {};
-  for (const lineRaw of qRaw.split(/\r?\n/)) {
-    const line = lineRaw.trim();
-    if (!line || line.startsWith("#")) continue;
-    const i = line.indexOf("=");
-    if (i < 0) {
-      m.parseErrors.push(`Ignored line (no '='): ${line}`);
-      continue;
+interface PredicateInstance {
+  type: string;
+  self?: string;
+  attrs: Record<string, string>;
+  id: string;
+}
+
+interface GroupNode {
+  path: string;
+  or: boolean;
+  predicates: Record<string, PredicateInstance>;
+  subgroups: Record<string, GroupNode>;
+}
+
+function getOrCreateGroup(root: GroupNode, groupPath: string): GroupNode {
+  if (!groupPath) return root;
+  const parts = groupPath.split(".");
+  let current = root;
+  let currentPath = "";
+  for (const part of parts) {
+    currentPath = currentPath ? `${currentPath}.${part}` : part;
+    if (!current.subgroups[part]) {
+      current.subgroups[part] = {
+        path: currentPath,
+        or: false,
+        predicates: {},
+        subgroups: {}
+      };
     }
-    entries[line.slice(0, i).trim()] = line.slice(i + 1).trim();
+    current = current.subgroups[part];
   }
-  if (!Object.keys(entries).length) return m;
+  return current;
+}
 
-  // Group entries by predicate id (full dotted prefix ending at a predicate name).
-  interface Pred { type: string; self?: string; attrs: Record<string, string>; id: string }
-  const preds: Record<string, Pred> = {};
-
-  for (const [key, val] of Object.entries(entries)) {
-    const segs = key.split(".");
-    let idEnd = -1;
-    let ptype = "";
-    // Find the FIRST non-group segment that is a predicate name — so
-    // 'daterange.property' groups as daterange with attr 'property',
-    // while 'group.1_property.value' still groups as property.
-    for (let i = 0; i < segs.length; i++) {
-      const s = stripNum(segs[i]).toLowerCase();
-      if (QB_PREDICATES.has(s) && s !== "group") {
-        idEnd = i;
-        ptype = s;
-        break;
-      }
-    }
-    if (idEnd < 0) {
-      // group-level or global params
-      const last = stripNum(segs[segs.length - 1]).toLowerCase();
-      const prev = segs.length > 1 ? stripNum(segs[segs.length - 2]).toLowerCase() : "";
-      if (last === "or" && prev === "p" && val === "true") m.orCount++;
-      else if (segs[0] === "p") { /* p.limit, p.hits, p.offset, p.guessTotal — ignore */ }
-      else if (stripNum(segs[segs.length - 1]).toLowerCase() === "group") { /* bare group */ }
-      else m.notes.push(`Unrecognized predicate '${key}' — ignored.`);
-      continue;
-    }
-    const id = segs.slice(0, idEnd + 1).join(".");
-    const attr = segs.slice(idEnd + 1).map(stripNum).join(".").toLowerCase();
-    if (!preds[id]) preds[id] = { type: ptype, attrs: {}, id };
-    if (attr === "") preds[id].self = val;
-    else preds[id].attrs[attr] = val;
+function getUnionBranches(g: GroupNode): number {
+  const subgroupBranches = Object.values(g.subgroups).map(getUnionBranches);
+  const predicateCount = Object.keys(g.predicates).length;
+  
+  if (g.or) {
+    const subgroupSum = subgroupBranches.reduce((sum, b) => sum + b, 0);
+    return predicateCount + subgroupSum;
+  } else {
+    if (subgroupBranches.length === 0) return 1;
+    return subgroupBranches.reduce((prod, b) => prod * b, 1);
   }
+}
 
-  for (const pred of Object.values(preds)) {
+function processGroup(g: GroupNode, m: QueryModel) {
+  for (const pred of Object.values(g.predicates)) {
     const a = pred.attrs;
     switch (pred.type) {
       case "type":
@@ -71,6 +68,8 @@ export function parseQueryBuilder(qRaw: string): QueryModel {
         if (pred.self) m.paths.push(pred.self);
         if (a["flat"] === "true" || a["exact"] === "true")
           m.notes.push("path.flat/exact — evaluated as direct-child/exact path restriction.");
+        if (a["self"] === "true")
+          m.notes.push("path.self=true — query matches the path node itself as well as descendants.");
         break;
       case "excludepaths":
         if (pred.self) {
@@ -82,27 +81,33 @@ export function parseQueryBuilder(qRaw: string): QueryModel {
         const name = pred.self ?? a["property"];
         if (!name) { m.parseErrors.push(`property predicate '${pred.id}' has no property name.`); break; }
         const p = getProp(m, name);
-        // Collect .value AND all .N_value entries from the raw key set —
-        // numeric-stripped attrs collide in the attrs map, so read raw.
-        const allVals = [
-          ...new Set(
-            Object.entries(entries)
-              .filter(([k]) => k.startsWith(pred.id + ".") && /(^|\.)(\d+_)?value$/.test(k))
-              .map(([, v]) => v)
-          )
-        ];
+        const allVals: string[] = [];
+        if (pred.self) {
+          allVals.push(pred.self);
+        }
+        for (const [k, v] of Object.entries(a)) {
+          const normK = k.split(".").map(stripNum).join(".").toLowerCase();
+          if (normK === "value") {
+            allVals.push(v);
+          }
+        }
+        const uniqueVals = [...new Set(allVals)];
         const op = (a["operation"] || "equals").toLowerCase();
-        if (op === "equals") pushOp(p, allVals.length > 1 ? "in" : "=");
+        if (op === "equals") pushOp(p, uniqueVals.length > 1 ? "in" : "=");
         else if (op === "unequals") pushOp(p, "!=");
-        else if (op === "like") { pushOp(p, "like"); m.notes.push(`property.operation=like on ${p.name} — translates to jcr:like (scan within index).`); }
+        else if (op === "like") {
+          pushOp(p, "like");
+          m.notes.push(`property.operation=like on ${p.name} — translates to jcr:like (scan within index).`);
+          if (uniqueVals[0]?.startsWith("%")) m.leadingWildcards++;
+        }
         else if (op === "exists") {
-          if ((allVals[0] ?? "true") === "false") { p.nullCheck = true; pushOp(p, "not"); }
+          if ((uniqueVals[0] ?? "true") === "false") { p.nullCheck = true; pushOp(p, "not"); }
           else { p.notNullCheck = true; pushOp(p, "exists"); }
         } else if (op === "not") { p.nullCheck = true; pushOp(p, "not"); }
-        if (allVals.length > 1) m.orCount += allVals.length - 1;
+        
         const byName = inferTypeFromName(p.name);
         if (byName) applyValueType(p, byName);
-        else if (allVals[0]) applyValueType(p, inferTypeFromValue(allVals[0]));
+        else if (uniqueVals[0]) applyValueType(p, inferTypeFromValue(uniqueVals[0]));
         if (a["depth"]) m.notes.push(`property.depth on ${p.name} — matches descendants of result node; verify relative path coverage.`);
         break;
       }
@@ -120,6 +125,9 @@ export function parseQueryBuilder(qRaw: string): QueryModel {
         p.type = "Date";
         p.ordered = true;
         pushOp(p, "range");
+        if (pred.type === "relativedaterange") {
+          m.notes.push(`relativedaterange dynamic offset on ${p.name} resolved at execution time; indexed as a range query on a Date property.`);
+        }
         break;
       }
       case "rangeproperty": {
@@ -164,6 +172,12 @@ export function parseQueryBuilder(qRaw: string): QueryModel {
         const p = getProp(m, a["property"] ?? "jcr:content/cq:tags");
         p.multi = true;
         pushOp(p, "=");
+        
+        const tagVal = pred.self ?? a["id"] ?? a["tagid"];
+        if (tagVal && typeof tagVal === "string" && tagVal.includes(":")) {
+          const ns = tagVal.split(":")[0];
+          m.notes.push(`tagid namespace '${ns}' detected. Ensure tag namespaces are mapped in cq:tags.`);
+        }
         m.notes.push(`${pred.type} predicate — cq:tags is multi-valued; multi-value properties are indexed per value automatically.`);
         break;
       }
@@ -202,6 +216,97 @@ export function parseQueryBuilder(qRaw: string): QueryModel {
         break;
     }
   }
+
+  for (const sub of Object.values(g.subgroups)) {
+    processGroup(sub, m);
+  }
+}
+
+export function parseQueryBuilder(qRaw: string): QueryModel {
+  const m = emptyModel("QueryBuilder");
+  const entries: Record<string, string> = {};
+  for (const lineRaw of qRaw.split(/\r?\n/)) {
+    const line = lineRaw.trim();
+    if (!line || line.startsWith("#")) continue;
+    const i = line.indexOf("=");
+    if (i < 0) {
+      m.parseErrors.push(`Ignored line (no '='): ${line}`);
+      continue;
+    }
+    entries[line.slice(0, i).trim()] = line.slice(i + 1).trim();
+  }
+  if (!Object.keys(entries).length) return m;
+
+  const rootGroup: GroupNode = {
+    path: "",
+    or: false,
+    predicates: {},
+    subgroups: {}
+  };
+
+  for (const [key, val] of Object.entries(entries)) {
+    const segs = key.split(".");
+    
+    // 1. Check if it's a group parameter via "p"
+    const pIndex = segs.findIndex(s => stripNum(s).toLowerCase() === "p");
+    if (pIndex >= 0) {
+      const groupPath = segs.slice(0, pIndex).join(".");
+      const param = segs.slice(pIndex + 1).map(stripNum).join(".").toLowerCase();
+      
+      const g = getOrCreateGroup(rootGroup, groupPath);
+      if (param === "or" && val === "true") {
+        g.or = true;
+      }
+      continue;
+    }
+
+    // 2. Check if it's a predicate
+    let predIndex = -1;
+    let ptype = "";
+    for (let i = 0; i < segs.length; i++) {
+      const s = stripNum(segs[i]).toLowerCase();
+      if (QB_PREDICATES.has(s) && s !== "group") {
+        predIndex = i;
+        ptype = s;
+        break;
+      }
+    }
+
+    if (predIndex >= 0) {
+      const groupPath = segs.slice(0, predIndex).join(".");
+      const predId = segs.slice(0, predIndex + 1).join(".");
+      const attr = segs.slice(predIndex + 1).join(".");
+      
+      const g = getOrCreateGroup(rootGroup, groupPath);
+      if (!g.predicates[predId]) {
+        g.predicates[predId] = {
+          type: ptype,
+          attrs: {},
+          id: predId
+        };
+      }
+      const pred = g.predicates[predId];
+      if (attr === "") {
+        pred.self = val;
+      } else {
+        pred.attrs[attr] = val;
+      }
+    } else {
+      // global or unrecognized parameter
+      const last = stripNum(segs[segs.length - 1]).toLowerCase();
+      if (segs[0] === "p") { /* ignore p.limit, p.offset, etc. */ }
+      else if (last === "group") { /* bare group definition, e.g. group.group = ... */ }
+      else {
+        m.notes.push(`Unrecognized parameter '${key}' — ignored.`);
+      }
+    }
+  }
+
+  // Traverse hierarchy to populate model properties
+  processGroup(rootGroup, m);
+
+  // Compute total logical union branches
+  m.orCount = getUnionBranches(rootGroup) - 1;
 
   return m;
 }
