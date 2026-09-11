@@ -74,7 +74,7 @@ export const metadata: Metadata = {
     images: ["/og-image.jpg"]
   },
   verification: {
-    google: process.env.NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION || undefined
+    google: "iiM7LtclzkQTI0Kk2jdcy4WjpJuheQDIuO4RMY3Vn-c"
   }
 };
 
