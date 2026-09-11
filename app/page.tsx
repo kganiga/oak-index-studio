@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import {
   AlertTriangle, CheckCircle2, Copy, Download, FileCode2, Lightbulb, TreePine,
-  Sun, Moon, Share2, History as HistoryIcon, Save, Columns2, Keyboard, FileDown, ClipboardList, X, Trash2, FileText, BookOpen
+  Sun, Moon, Share2, History as HistoryIcon, Save, Columns2, Keyboard, FileDown, ClipboardList, X, Trash2, FileText, BookOpen, ExternalLink
 } from "lucide-react";
 import { parseSQL2, parseXPath, parseQueryBuilder, parseExplain, parseSQL2Selectors, parseExplainCosts, parseSQL2UnionBranches } from "@/lib/analyze";
 import { generate, Target } from "@/lib/generate";
@@ -174,6 +174,46 @@ function KnowledgeList({ categoryKey, platform }: { categoryKey: string; platfor
   if (!entries.length) return null;
   return <>{entries.map((e) => <KnowledgeCard key={e.id} entry={e} />)}</>;
 }
+
+const FAQ_ITEMS = [
+  {
+    q: "Why are my AEM queries failing with QueryTraversalException in production?",
+    a: "In Apache Jackrabbit Oak, when a query executes without a suitable Oak Lucene index, Oak must traverse nodes hierarchically under the query path. To prevent repository degradation, Oak halts the query when traversal exceeds the safety threshold (defaulting to 10,000 or 100,000 nodes) with a QueryTraversalException. Generating a Lucene index containing property definitions for your filtered properties eliminates traversal."
+  },
+  {
+    q: "What happened to OakUtils, and is Oak Index Studio a replacement?",
+    a: "OakUtils (formerly hosted at oakutils.appspot.com) was the most popular community tool for generating Oak Lucene index XMLs from AEM queries before becoming permanently unreachable. Oak Index Studio was designed as a modern, open-source replacement with zero server dependencies, instant real-time analysis, index health evaluations, heuristic cost scoring, and Explain plan inspection."
+  },
+  {
+    q: "How does Oak Index Studio compare to generating indexes with ChatGPT or generic AI?",
+    a: "General LLMs frequently hallucinate or misapply Oak constraints. For instance, LLMs often assign propertyIndex=true to negated LIKE clauses (which Oak cannot index), hallucinate unnecessary evaluatePathRestrictions=true, or enforce propertyIndex alongside ordered=true for sorting-only properties. Oak Index Studio uses deterministic, unit-tested rules based directly on official Apache Jackrabbit Oak specifications."
+  },
+  {
+    q: "How do I deploy generated Oak index definitions on AEM as a Cloud Service (AEMaaCS)?",
+    a: "On AEMaaCS, custom indexes extending out-of-the-box indexes must follow the naming convention <indexName>-custom-<version> (such as cqPageLucene-custom-1). Deploy the definition under /oak:index inside your project's ui.apps module. Never set reindex=true in Cloud Service packages — Cloud Manager automatically detects the version increment and handles background reindexing during deployment."
+  },
+  {
+    q: "When should I use propertyIndex=true vs ordered=true in an Oak Lucene index?",
+    a: "Use propertyIndex=true when a property appears in query filter criteria (equality '=', IN(), or bounded LIKE) so Oak indexes the value for rapid lookup. Use ordered=true when a property is used in an ORDER BY clause or in inequality/range comparisons (>, <, BETWEEN, daterange) to enable Lucene DocValues seek instead of in-memory sorting."
+  },
+  {
+    q: "Is my query text or repository data sent to any remote server?",
+    a: "No. Oak Index Studio operates entirely client-side inside your browser tab. No server APIs, telemetry, or external trackers are contacted. Your repository structure, property names, and query details never leave your local environment."
+  }
+];
+
+const FAQ_STRUCTURED_DATA = {
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  mainEntity: FAQ_ITEMS.map((item) => ({
+    "@type": "Question",
+    name: item.q,
+    acceptedAnswer: {
+      "@type": "Answer",
+      text: item.a
+    }
+  }))
+};
 
 export default function Page() {
   const [tab, setTab] = useState<InputTab>("SQL2");
@@ -449,7 +489,8 @@ export default function Page() {
   const props = result ? Object.values(result.model.props) : [];
 
   return (
-    <main className="flex h-screen flex-col">
+    <main className="flex min-h-screen flex-col">
+      <div className="flex h-screen min-h-[680px] flex-col">
       {/* Header */}
       <header className="flex flex-wrap items-center justify-between gap-2 border-b border-line bg-panel px-5 py-3">
         <div className="flex items-center gap-3" title="Independent community tool — not affiliated with, endorsed by, or sponsored by Adobe.">
@@ -551,6 +592,16 @@ export default function Page() {
               {t === "cloud" ? "AEMaaCS" : "AEM 6.5"}
             </button>
           ))}
+
+          <span className="mx-1 h-4 w-px bg-line" />
+          <a
+            href="/guide"
+            className="flex items-center gap-1.5 rounded border border-line bg-panel2 px-2.5 py-1 font-mono text-xs text-dim transition hover:border-oak hover:text-oak"
+            title="Read the Oak Index Studio Guide & Documentation"
+          >
+            <BookOpen className="h-3.5 w-3.5 text-oak" />
+            <span>Guide</span>
+          </a>
         </div>
       </header>
 
@@ -1092,26 +1143,104 @@ export default function Page() {
           </p>
         </div>
       </div>
+      </div>
 
-      <footer className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 border-t border-line bg-panel px-4 py-2 text-center text-[10px] text-dim">
-        <span>
-          Privacy: everything runs in your browser — queries, index definitions, and analysis are never sent to a
-          server. Saved history and theme live only in your browser&apos;s local storage; clear them anytime via
-          your browser settings.
-        </span>
-        <span>
-          Terms: provided as-is, no warranty —{" "}
-          <a href="https://github.com/kganiga/oak-index-studio/blob/master/LICENSE" target="_blank" rel="noreferrer" className="underline hover:text-fg">
-            MIT licensed
-          </a>
-          .
-        </span>
-        <span>
-          <a href="https://github.com/kganiga/oak-index-studio/issues" target="_blank" rel="noreferrer" className="underline hover:text-fg">
-            Contact / report an issue
-          </a>
-        </span>
-        <span>Independent community tool — not affiliated with, endorsed by, or sponsored by Adobe.</span>
+      {/* Search Engine Optimized Documentation, Guide, and FAQ Section */}
+      <section id="docs" className="border-t border-line bg-panel2/30 px-6 py-12 text-sm">
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(FAQ_STRUCTURED_DATA) }}
+        />
+        <div className="mx-auto max-w-5xl space-y-12">
+          {/* Section Heading */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 font-mono text-xs text-oak">
+              <BookOpen className="h-4 w-4" />
+              <span>AEM OAK LUCENE REFERENCE &amp; BEST PRACTICES</span>
+            </div>
+            <h2 className="text-2xl font-bold tracking-tight text-fg md:text-3xl">
+              Understanding AEM Oak Lucene Indexing &amp; Query Tuning
+            </h2>
+            <p className="max-w-3xl leading-relaxed text-dim">
+              Apache Jackrabbit Oak powers the content repository across Adobe Experience Manager (AEMaaCS, AEM 6.5, and AMS).
+              Because Oak is a hierarchical content repository, unindexed JCR-SQL2, XPath, and Query Builder queries cause full content traversals.
+              Oak Index Studio generates production-grade <code>oak:QueryIndexDefinition</code> nodes designed to prevent traversals and maximize query throughput.
+            </p>
+            <div className="flex flex-wrap items-center gap-3 pt-2">
+              <a
+                href="/guide"
+                className="inline-flex items-center gap-1.5 rounded bg-oak px-4 py-2 font-mono text-xs font-semibold text-ink transition hover:opacity-90"
+              >
+                <span>Read the Complete Guide</span>
+                <ExternalLink className="h-3.5 w-3.5" />
+              </a>
+              <a
+                href="https://jackrabbit.apache.org/oak/docs/query/lucene.html"
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1.5 rounded border border-line bg-panel px-4 py-2 font-mono text-xs text-dim transition hover:border-oak hover:text-fg"
+              >
+                <span>Apache Oak Lucene Documentation</span>
+                <ExternalLink className="h-3.5 w-3.5" />
+              </a>
+            </div>
+          </div>
+
+          {/* 3 Pillar Cards */}
+          <div className="grid gap-6 md:grid-cols-3">
+            <div className="rounded border border-line bg-panel p-5">
+              <h3 className="font-mono text-xs font-semibold text-mint">01 / DETERMINISTIC RULE ENGINE</h3>
+              <p className="mt-2 text-xs leading-relaxed text-dim">
+                Automatically determines <code>propertyIndex</code>, <code>ordered</code>, <code>type</code>, and <code>compatVersion</code> flags directly from your query constraints without guesswork or AI hallucinations.
+              </p>
+            </div>
+            <div className="rounded border border-line bg-panel p-5">
+              <h3 className="font-mono text-xs font-semibold text-oak">02 / 14 INDEX HEALTH CHECKS</h3>
+              <p className="mt-2 text-xs leading-relaxed text-dim">
+                Validates path scoping (<code>includedPaths</code> / <code>queryPaths</code>), async modes (<code>async</code> / <code>nrt</code>), null-check definitions, and warns against duplicate OOTB indexing.
+              </p>
+            </div>
+            <div className="rounded border border-line bg-panel p-5">
+              <h3 className="font-mono text-xs font-semibold text-warn">03 / EXPLAIN &amp; XML DIFFING</h3>
+              <p className="mt-2 text-xs leading-relaxed text-dim">
+                Inspect Oak Explain plan cost outputs to diagnose index selection decisions, or compare your existing <code>.content.xml</code> against query requirements.
+              </p>
+            </div>
+          </div>
+
+          {/* FAQ Section */}
+          <div className="space-y-6">
+            <div className="border-b border-line pb-3">
+              <h3 className="text-xl font-bold text-fg">Frequently Asked Questions (FAQ)</h3>
+              <p className="text-xs text-dim">Common questions on AEM index creation, query performance, and deployment.</p>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              {FAQ_ITEMS.map((item, idx) => (
+                <div key={idx} className="rounded border border-line bg-panel p-5">
+                  <h4 className="text-sm font-semibold text-fg">{item.q}</h4>
+                  <p className="mt-2 text-xs leading-relaxed text-dim">{item.a}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Enhanced Footer */}
+      <footer className="border-t border-line bg-panel px-6 py-6 text-xs text-dim">
+        <div className="mx-auto flex max-w-5xl flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <a href="/" className="font-semibold text-fg hover:text-oak">Oak Index Studio</a>
+            <a href="/guide" className="hover:text-fg">Documentation Guide</a>
+            <a href="#docs" className="hover:text-fg">Reference &amp; FAQ</a>
+            <a href="https://github.com/kganiga/oak-index-studio" target="_blank" rel="noreferrer" className="hover:text-fg">GitHub</a>
+            <a href="https://github.com/kganiga/oak-index-studio/blob/master/LICENSE" target="_blank" rel="noreferrer" className="hover:text-fg">MIT License</a>
+            <a href="https://github.com/kganiga/oak-index-studio/issues" target="_blank" rel="noreferrer" className="hover:text-fg">Report Issue</a>
+          </div>
+          <p className="text-[11px] text-dim">
+            100% Client-Side Privacy • Independent Community Tool (Not affiliated with Adobe)
+          </p>
+        </div>
       </footer>
     </main>
   );
